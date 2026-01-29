@@ -3,7 +3,7 @@
 <head>
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
-  <title>Chaos Drift - Clifford</title>
+  <title>Chaos Drift Gallery - Clifford</title>
   <style>
     html, body { margin: 0; padding: 0; background: #0b0c10; }
     canvas { display: block; margin: 0 auto; }
@@ -13,51 +13,192 @@
       background: rgba(0,0,0,0.45);
       color: #eee;
       font-family: system-ui, -apple-system, sans-serif;
-      border-radius: 12px;
+      border-radius: 14px;
       backdrop-filter: blur(6px);
-      width: 300px;
+      width: 320px;
+      user-select: none;
     }
-    #ui .row{ display:flex; gap:8px; align-items:center; margin:8px 0; }
-    #ui label{ width: 64px; opacity:0.9; font-size: 12px; }
+    #ui .row{ display:flex; gap:10px; align-items:center; margin:8px 0; }
+    #ui label{ width: 74px; opacity:0.9; font-size: 12px; }
     #ui input[type='range']{ flex:1; }
-    #ui button{ width:100%; padding:10px; border-radius:10px; border:0; cursor:pointer; margin-top:8px; }
-    #vals{ font-size: 12px; opacity: 0.85; line-height: 1.5; }
+    #ui button{
+      width:100%; padding:10px;
+      border-radius:12px; border:0; cursor:pointer;
+      margin-top:8px;
+    }
+    #ui .two{ display:flex; gap:8px; margin-top:8px; }
+    #ui .two button{ margin-top:0; width:50%; }
+    #vals{ font-size: 12px; opacity: 0.85; line-height: 1.5; margin-top: 8px; white-space: pre; }
+    #hint{ font-size: 11px; opacity: 0.7; line-height: 1.45; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id='ui'>
-    <div class='row'><label>速さ</label><input id='speed' type='range' min='0.0001' max='0.01' step='0.0001' value='0.0020'></div>
-    <div class='row'><label>振れ幅</label><input id='amp' type='range' min='0.2' max='3.0' step='0.01' value='1.8'></div>
-    <div class='row'><label>フェード</label><input id='fade' type='range' min='0' max='40' step='1' value='6'></div>
-    <div class='row'><label>密度</label><input id='density' type='range' min='2000' max='60000' step='500' value='18000'></div>
-    <button id='reset'>リセット</button>
+    <div class='row'><label>変化の速さ</label><input id='speed' type='range' min='0.0005' max='0.02' step='0.0005' value='0.0040'></div>
+    <div class='row'><label>フェード</label><input id='fade' type='range' min='0' max='50' step='1' value='8'></div>
+    <div class='row'><label>密度</label><input id='density' type='range' min='2000' max='90000' step='500' value='28000'></div>
+    <div class='row'><label>外れの厳しさ</label><input id='strict' type='range' min='0.02' max='0.30' step='0.01' value='0.10'></div>
+    <div class='row'><label>スケール</label><input id='scale' type='range' min='0.10' max='0.40' step='0.005' value='0.22'></div>
+
+    <div class='two'>
+      <button id='reset'>リセット</button>
+      <button id='shuffle'>次へ</button>
+    </div>
+    <button id='save'>PNG保存</button>
+
     <div id='vals'></div>
+    <div id='hint'>
+      点だけになりがちな領域は自動で弾く。<br>
+      霧っぽいのも輪郭っぽいのも残しつつ、ちっこい点雲だけ避ける設定。<br>
+      外れの厳しさを上げるほど、より確実に図形側へ寄る。
+    </div>
   </div>
 
   <script src='https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js'></script>
   <script>
-    let x = 0.1, y = 0.1;
-
+    // =========================
+    // 設定
+    // =========================
     const cfg = {
-      speed: 0.0020,
-      amp: 1.8,
-      fade: 6,
-      density: 18000
+      speed: 0.0040,
+      fade: 8,
+      density: 28000,
+      strict: 0.10,
+      scale: 0.22
     };
 
-    const seeds = {
-      a: 10.1,
-      b: 20.2,
-      c: 30.3,
-      d: 40.4
-    };
+    // 図形が出やすいプリセット（ここに当たりを足していくと強い）
+    const presets = [
+      { a: -1.40, b:  1.60, c:  1.00, d:  0.70 },
+      { a: -1.70, b:  1.80, c:  0.90, d:  0.40 },
+      { a: -1.20, b:  1.70, c:  1.40, d:  0.20 },
+      { a: -1.55, b:  1.45, c:  1.05, d:  0.55 },
+      { a: -1.85, b:  1.55, c:  0.75, d:  0.95 },
+      { a: -1.62, b:  1.36, c:  1.22, d:  0.12 },
+      { a: -1.33, b:  1.74, c:  0.82, d:  0.66 }
+    ];
 
+    // =========================
+    // 状態
+    // =========================
+    let x = 0.1, y = 0.1;
+    let cur = 0;
+    let next = 1;
+    let phase = 0;     // 0..1
+    let locked = null; // 外れ弾きで今フレーム採用するパラメータ
+
+    // =========================
+    // ユーティリティ
+    // =========================
+    function easeInOut(t){
+      return t * t * (3 - 2 * t);
+    }
+
+    function pickNextIndex(){
+      let k = cur;
+      while (k === cur) k = floor(random(presets.length));
+      return k;
+    }
+
+    function stepPresetBlend(speed){
+      phase += speed;
+      if (phase >= 1){
+        phase = 0;
+        cur = next;
+        next = pickNextIndex();
+      }
+      const t = easeInOut(phase);
+      const P = presets[cur];
+      const Q = presets[next];
+      return {
+        a: lerp(P.a, Q.a, t),
+        b: lerp(P.b, Q.b, t),
+        c: lerp(P.c, Q.c, t),
+        d: lerp(P.d, Q.d, t),
+      };
+    }
+
+    // 小さすぎる点雲（固定点・小周期）を弾くためのスコア
+    // 霧も輪郭もOKにして、極小だけを落とす
+    function chaosScore(p){
+      let tx = 0.1, ty = 0.1;
+      let minx =  1e9, maxx = -1e9, miny =  1e9, maxy = -1e9;
+
+      // 捨て反復
+      for (let i = 0; i < 90; i++){
+        const nx = Math.sin(p.a * ty) + p.c * Math.cos(p.a * tx);
+        const ny = Math.sin(p.b * tx) + p.d * Math.cos(p.b * ty);
+        tx = nx; ty = ny;
+        if (!isFinite(tx) || !isFinite(ty)) return 0;
+      }
+
+      // 広がりチェック
+      const sample = 1100;
+      for (let i = 0; i < sample; i++){
+        const nx = Math.sin(p.a * ty) + p.c * Math.cos(p.a * tx);
+        const ny = Math.sin(p.b * tx) + p.d * Math.cos(p.b * ty);
+        tx = nx; ty = ny;
+
+        if (!isFinite(tx) || !isFinite(ty)) return 0;
+
+        if (tx < minx) minx = tx;
+        if (tx > maxx) maxx = tx;
+        if (ty < miny) miny = ty;
+        if (ty > maxy) maxy = ty;
+      }
+
+      const w = maxx - minx;
+      const h = maxy - miny;
+
+      // 極小は落とす（これが点だけ対策）
+      if (w < 0.25 || h < 0.25) return 0;
+
+      // 発散系も少し抑える（画面外ばかりでスカる）
+      if (w > 6.2 || h > 6.2) return 0.02;
+
+      // 面積スコア
+      return w * h;
+    }
+
+    function getGoodParams(speed){
+      // すでにロック済みなら維持して急な切り替えを減らす
+      if (locked) return locked;
+
+      // まず補間で候補
+      let p = stepPresetBlend(speed);
+      let s = chaosScore(p);
+
+      if (s >= cfg.strict) {
+        locked = p;
+        return p;
+      }
+
+      // 外れなら、補間を一旦切って次へジャンプ
+      // 点だけ時間をほぼゼロにする
+      for (let tries = 0; tries < 6; tries++){
+        phase = 0;
+        next = pickNextIndex();
+        p = stepPresetBlend(speed);
+        s = chaosScore(p);
+        if (s >= cfg.strict) {
+          locked = p;
+          return p;
+        }
+      }
+
+      // 最後の保険
+      locked = p;
+      return p;
+    }
+
+    // =========================
+    // p5
+    // =========================
     function setup() {
       const s = Math.min(window.innerWidth, window.innerHeight);
       createCanvas(s, s);
       pixelDensity(1);
       background(11, 12, 16);
-
       bindUI();
     }
 
@@ -69,82 +210,88 @@
     }
 
     function bindUI(){
-      const sp = document.getElementById('speed');
-      const am = document.getElementById('amp');
-      const fd = document.getElementById('fade');
-      const dn = document.getElementById('density');
+      const elSpeed = document.getElementById('speed');
+      const elFade = document.getElementById('fade');
+      const elDen = document.getElementById('density');
+      const elStrict = document.getElementById('strict');
+      const elScale = document.getElementById('scale');
 
-      sp.addEventListener('input', () => cfg.speed = parseFloat(sp.value));
-      am.addEventListener('input', () => cfg.amp = parseFloat(am.value));
-      fd.addEventListener('input', () => cfg.fade = parseInt(fd.value, 10));
-      dn.addEventListener('input', () => cfg.density = parseInt(dn.value, 10));
+      elSpeed.addEventListener('input', () => cfg.speed = parseFloat(elSpeed.value));
+      elFade.addEventListener('input', () => cfg.fade = parseInt(elFade.value, 10));
+      elDen.addEventListener('input', () => cfg.density = parseInt(elDen.value, 10));
+      elStrict.addEventListener('input', () => cfg.strict = parseFloat(elStrict.value));
+      elScale.addEventListener('input', () => cfg.scale = parseFloat(elScale.value));
 
       document.getElementById('reset').addEventListener('click', () => {
         background(11, 12, 16);
         x = 0.1; y = 0.1;
       });
-    }
 
-    function driftParam(seed, t, amp){
-      // noiseは 0..1 → -1..1 にしてから振れ幅
-      return (noise(seed + t) * 2 - 1) * amp;
+      document.getElementById('shuffle').addEventListener('click', () => {
+        // 次の世界へ強制ジャンプ
+        phase = 0;
+        next = pickNextIndex();
+      });
+
+      document.getElementById('save').addEventListener('click', () => {
+        const stamp = new Date().toISOString().replaceAll(':','-');
+        saveCanvas(`chaos-${stamp}`, 'png');
+      });
     }
 
     function draw() {
-      // フェード：過去の軌跡をうっすら残して積層させる
+      locked = null;
+
+      // 背景フェード（残像で育てる）
       noStroke();
       fill(11, 12, 16, cfg.fade);
       rect(0, 0, width, height);
 
-      const t = frameCount * cfg.speed;
+      // 良い領域だけを歩く
+      const p = getGoodParams(cfg.speed);
+      const aa = p.a;
+      const bb = p.b;
+      const cc = p.c;
+      const dd = p.d;
 
-      // a,b,c,d を時間で漂わせる（中心0、範囲±amp）
-      const a = driftParam(seeds.a, t, cfg.amp);
-      const b = driftParam(seeds.b, t, cfg.amp);
-      const c = driftParam(seeds.c, t, cfg.amp);
-      const d = driftParam(seeds.d, t, cfg.amp);
-
-      // たまにカスるのが良いけど、破綻しやすい領域を少し抑える
-      // → ほんの少し中心に寄せる
-      const aa = a * 0.95;
-      const bb = b * 0.95;
-      const cc = c * 0.95;
-      const dd = d * 0.95;
-
-      // 描画
-      const scale = width * 0.22;
+      // 描画設定
+      const scale = width * cfg.scale;
       const cx = width * 0.5;
       const cy = height * 0.5;
 
       stroke(235, 238, 245, 24);
       strokeWeight(1);
 
-      // 収束前の捨て反復を軽く
-      for (let i = 0; i < 30; i++) {
+      // 捨て反復（軽く安定させる）
+      for (let i = 0; i < 30; i++){
         const nx = Math.sin(aa * y) + cc * Math.cos(aa * x);
         const ny = Math.sin(bb * x) + dd * Math.cos(bb * y);
         x = nx; y = ny;
+        if (!isFinite(x) || !isFinite(y)) { x = 0.1; y = 0.1; break; }
       }
 
-      for (let i = 0; i < cfg.density; i++) {
+      // メイン描画
+      for (let i = 0; i < cfg.density; i++){
         const nx = Math.sin(aa * y) + cc * Math.cos(aa * x);
         const ny = Math.sin(bb * x) + dd * Math.cos(bb * y);
         x = nx; y = ny;
+
+        if (!isFinite(x) || !isFinite(y)) { x = 0.1; y = 0.1; break; }
 
         const px = cx + x * scale;
         const py = cy + y * scale;
 
-        if (px >= 0 && px < width && py >= 0 && py < height) {
-          point(px, py);
-        }
+        if (px >= 0 && px < width && py >= 0 && py < height) point(px, py);
       }
 
-      // 表示用
+      // 表示
       const el = document.getElementById('vals');
+      const sc = chaosScore(p);
       el.textContent =
         `a=${aa.toFixed(3)}  b=${bb.toFixed(3)}\n` +
         `c=${cc.toFixed(3)}  d=${dd.toFixed(3)}\n` +
-        `t=${t.toFixed(3)}  密度=${cfg.density}`;
+        `strict=${cfg.strict.toFixed(2)}  score=${sc.toFixed(3)}\n` +
+        `preset=${cur}→${next}  phase=${phase.toFixed(3)}  density=${cfg.density}`;
     }
   </script>
 </body>
