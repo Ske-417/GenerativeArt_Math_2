@@ -3,11 +3,11 @@
 <head>
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
-  <title>Chaos Art - Clifford Attractor</title>
+  <title>Chaos Drift - Clifford</title>
   <style>
     html, body { margin: 0; padding: 0; background: #0b0c10; }
     canvas { display: block; margin: 0 auto; }
-    #ui {
+    #ui{
       position: fixed; left: 12px; top: 12px;
       padding: 12px;
       background: rgba(0,0,0,0.45);
@@ -15,36 +15,41 @@
       font-family: system-ui, -apple-system, sans-serif;
       border-radius: 12px;
       backdrop-filter: blur(6px);
-      width: 280px;
+      width: 300px;
     }
-    #ui .row { display: flex; gap: 8px; margin: 8px 0; align-items: center; }
-    #ui label { width: 18px; opacity: 0.9; }
-    #ui input[type='range'] { flex: 1; }
-    #ui button { width: 100%; padding: 10px; border-radius: 10px; border: 0; cursor: pointer; }
-    #ui small { opacity: 0.75; display: block; margin-top: 6px; line-height: 1.4; }
+    #ui .row{ display:flex; gap:8px; align-items:center; margin:8px 0; }
+    #ui label{ width: 64px; opacity:0.9; font-size: 12px; }
+    #ui input[type='range']{ flex:1; }
+    #ui button{ width:100%; padding:10px; border-radius:10px; border:0; cursor:pointer; margin-top:8px; }
+    #vals{ font-size: 12px; opacity: 0.85; line-height: 1.5; }
   </style>
 </head>
 <body>
   <div id='ui'>
-    <div class='row'><label>a</label><input id='a' type='range' min='-3' max='3' step='0.001'></div>
-    <div class='row'><label>b</label><input id='b' type='range' min='-3' max='3' step='0.001'></div>
-    <div class='row'><label>c</label><input id='c' type='range' min='-3' max='3' step='0.001'></div>
-    <div class='row'><label>d</label><input id='d' type='range' min='-3' max='3' step='0.001'></div>
-    <div class='row'><label>密度</label><input id='n' type='range' min='20000' max='400000' step='1000'></div>
-    <button id='random'>ランダム生成</button>
-    <button id='save'>PNG保存</button>
-    <small>
-      反復で点を打っていくカオスアート。ランダム生成で当たりパラメータを探す。
-      背景は消さないので、何度か重ねると濃くなる。
-    </small>
+    <div class='row'><label>速さ</label><input id='speed' type='range' min='0.0001' max='0.01' step='0.0001' value='0.0020'></div>
+    <div class='row'><label>振れ幅</label><input id='amp' type='range' min='0.2' max='3.0' step='0.01' value='1.8'></div>
+    <div class='row'><label>フェード</label><input id='fade' type='range' min='0' max='40' step='1' value='6'></div>
+    <div class='row'><label>密度</label><input id='density' type='range' min='2000' max='60000' step='500' value='18000'></div>
+    <button id='reset'>リセット</button>
+    <div id='vals'></div>
   </div>
 
   <script src='https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js'></script>
   <script>
-    const UI = {};
-    const state = {
-      a: -1.4, b: 1.6, c: 1.0, d: 0.7,
-      n: 140000
+    let x = 0.1, y = 0.1;
+
+    const cfg = {
+      speed: 0.0020,
+      amp: 1.8,
+      fade: 6,
+      density: 18000
+    };
+
+    const seeds = {
+      a: 10.1,
+      b: 20.2,
+      c: 30.3,
+      d: 40.4
     };
 
     function setup() {
@@ -53,101 +58,93 @@
       pixelDensity(1);
       background(11, 12, 16);
 
-      UI.a = document.getElementById('a');
-      UI.b = document.getElementById('b');
-      UI.c = document.getElementById('c');
-      UI.d = document.getElementById('d');
-      UI.n = document.getElementById('n');
-
-      setUIFromState();
-
-      for (const k of ['a','b','c','d']) {
-        UI[k].addEventListener('input', () => {
-          state[k] = parseFloat(UI[k].value);
-          redrawArt();
-        });
-      }
-      UI.n.addEventListener('input', () => {
-        state.n = parseInt(UI.n.value, 10);
-        redrawArt();
-      });
-
-      document.getElementById('random').addEventListener('click', () => {
-        randomizeParams();
-        redrawArt();
-      });
-
-      document.getElementById('save').addEventListener('click', () => {
-        const stamp = new Date().toISOString().replaceAll(':','-');
-        saveCanvas(`chaos-${stamp}`, 'png');
-      });
-
-      noLoop();
-      redrawArt();
+      bindUI();
     }
 
     function windowResized() {
       const s = Math.min(window.innerWidth, window.innerHeight);
       resizeCanvas(s, s);
-      redrawArt();
-    }
-
-    function setUIFromState() {
-      UI.a.value = state.a;
-      UI.b.value = state.b;
-      UI.c.value = state.c;
-      UI.d.value = state.d;
-      UI.n.value = state.n;
-    }
-
-    function randomizeParams() {
-      // ほどよく「出やすい」範囲に寄せる
-      state.a = random(-2.0, 2.0);
-      state.b = random(-2.0, 2.0);
-      state.c = random(-2.0, 2.0);
-      state.d = random(-2.0, 2.0);
-      state.n = int(random(80000, 260000));
-      setUIFromState();
-    }
-
-    function redrawArt() {
       background(11, 12, 16);
+      x = 0.1; y = 0.1;
+    }
 
-      // Clifford attractor
-      // x_{n+1} = sin(a*y_n) + c*cos(a*x_n)
-      // y_{n+1} = sin(b*x_n) + d*cos(b*y_n)
-      let x = 0.1, y = 0.1;
+    function bindUI(){
+      const sp = document.getElementById('speed');
+      const am = document.getElementById('amp');
+      const fd = document.getElementById('fade');
+      const dn = document.getElementById('density');
 
-      // 収束前の捨て反復
-      for (let i = 0; i < 200; i++) {
-        const nx = Math.sin(state.a * y) + state.c * Math.cos(state.a * x);
-        const ny = Math.sin(state.b * x) + state.d * Math.cos(state.b * y);
-        x = nx; y = ny;
-      }
+      sp.addEventListener('input', () => cfg.speed = parseFloat(sp.value));
+      am.addEventListener('input', () => cfg.amp = parseFloat(am.value));
+      fd.addEventListener('input', () => cfg.fade = parseInt(fd.value, 10));
+      dn.addEventListener('input', () => cfg.density = parseInt(dn.value, 10));
 
-      // 画面への写像
-      // ざっくりスケール：綺麗に出ることが多い
+      document.getElementById('reset').addEventListener('click', () => {
+        background(11, 12, 16);
+        x = 0.1; y = 0.1;
+      });
+    }
+
+    function driftParam(seed, t, amp){
+      // noiseは 0..1 → -1..1 にしてから振れ幅
+      return (noise(seed + t) * 2 - 1) * amp;
+    }
+
+    function draw() {
+      // フェード：過去の軌跡をうっすら残して積層させる
+      noStroke();
+      fill(11, 12, 16, cfg.fade);
+      rect(0, 0, width, height);
+
+      const t = frameCount * cfg.speed;
+
+      // a,b,c,d を時間で漂わせる（中心0、範囲±amp）
+      const a = driftParam(seeds.a, t, cfg.amp);
+      const b = driftParam(seeds.b, t, cfg.amp);
+      const c = driftParam(seeds.c, t, cfg.amp);
+      const d = driftParam(seeds.d, t, cfg.amp);
+
+      // たまにカスるのが良いけど、破綻しやすい領域を少し抑える
+      // → ほんの少し中心に寄せる
+      const aa = a * 0.95;
+      const bb = b * 0.95;
+      const cc = c * 0.95;
+      const dd = d * 0.95;
+
+      // 描画
       const scale = width * 0.22;
       const cx = width * 0.5;
       const cy = height * 0.5;
 
-      // 軽めの点描
-      stroke(235, 238, 245, 18);
+      stroke(235, 238, 245, 24);
       strokeWeight(1);
 
-      for (let i = 0; i < state.n; i++) {
-        const nx = Math.sin(state.a * y) + state.c * Math.cos(state.a * x);
-        const ny = Math.sin(state.b * x) + state.d * Math.cos(state.b * y);
+      // 収束前の捨て反復を軽く
+      for (let i = 0; i < 30; i++) {
+        const nx = Math.sin(aa * y) + cc * Math.cos(aa * x);
+        const ny = Math.sin(bb * x) + dd * Math.cos(bb * y);
+        x = nx; y = ny;
+      }
+
+      for (let i = 0; i < cfg.density; i++) {
+        const nx = Math.sin(aa * y) + cc * Math.cos(aa * x);
+        const ny = Math.sin(bb * x) + dd * Math.cos(bb * y);
         x = nx; y = ny;
 
         const px = cx + x * scale;
         const py = cy + y * scale;
 
-        // たまに外れるのでガード
         if (px >= 0 && px < width && py >= 0 && py < height) {
           point(px, py);
         }
       }
+
+      // 表示用
+      const el = document.getElementById('vals');
+      el.textContent =
+        `a=${aa.toFixed(3)}  b=${bb.toFixed(3)}\n` +
+        `c=${cc.toFixed(3)}  d=${dd.toFixed(3)}\n` +
+        `t=${t.toFixed(3)}  密度=${cfg.density}`;
     }
   </script>
 </body>
