@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang='ja'>
+<head>
+  <meta charset='utf-8' />
+  <meta name='viewport' content='width=device-width, initial-scale=1' />
+  <title>Chaos Art - Clifford Attractor</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0b0c10; }
+    canvas { display: block; margin: 0 auto; }
+    #ui {
+      position: fixed; left: 12px; top: 12px;
+      padding: 12px;
+      background: rgba(0,0,0,0.45);
+      color: #eee;
+      font-family: system-ui, -apple-system, sans-serif;
+      border-radius: 12px;
+      backdrop-filter: blur(6px);
+      width: 280px;
+    }
+    #ui .row { display: flex; gap: 8px; margin: 8px 0; align-items: center; }
+    #ui label { width: 18px; opacity: 0.9; }
+    #ui input[type='range'] { flex: 1; }
+    #ui button { width: 100%; padding: 10px; border-radius: 10px; border: 0; cursor: pointer; }
+    #ui small { opacity: 0.75; display: block; margin-top: 6px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div id='ui'>
+    <div class='row'><label>a</label><input id='a' type='range' min='-3' max='3' step='0.001'></div>
+    <div class='row'><label>b</label><input id='b' type='range' min='-3' max='3' step='0.001'></div>
+    <div class='row'><label>c</label><input id='c' type='range' min='-3' max='3' step='0.001'></div>
+    <div class='row'><label>d</label><input id='d' type='range' min='-3' max='3' step='0.001'></div>
+    <div class='row'><label>密度</label><input id='n' type='range' min='20000' max='400000' step='1000'></div>
+    <button id='random'>ランダム生成</button>
+    <button id='save'>PNG保存</button>
+    <small>
+      反復で点を打っていくカオスアート。ランダム生成で当たりパラメータを探す。
+      背景は消さないので、何度か重ねると濃くなる。
+    </small>
+  </div>
+
+  <script src='https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js'></script>
+  <script>
+    const UI = {};
+    const state = {
+      a: -1.4, b: 1.6, c: 1.0, d: 0.7,
+      n: 140000
+    };
+
+    function setup() {
+      const s = Math.min(window.innerWidth, window.innerHeight);
+      createCanvas(s, s);
+      pixelDensity(1);
+      background(11, 12, 16);
+
+      UI.a = document.getElementById('a');
+      UI.b = document.getElementById('b');
+      UI.c = document.getElementById('c');
+      UI.d = document.getElementById('d');
+      UI.n = document.getElementById('n');
+
+      setUIFromState();
+
+      for (const k of ['a','b','c','d']) {
+        UI[k].addEventListener('input', () => {
+          state[k] = parseFloat(UI[k].value);
+          redrawArt();
+        });
+      }
+      UI.n.addEventListener('input', () => {
+        state.n = parseInt(UI.n.value, 10);
+        redrawArt();
+      });
+
+      document.getElementById('random').addEventListener('click', () => {
+        randomizeParams();
+        redrawArt();
+      });
+
+      document.getElementById('save').addEventListener('click', () => {
+        const stamp = new Date().toISOString().replaceAll(':','-');
+        saveCanvas(`chaos-${stamp}`, 'png');
+      });
+
+      noLoop();
+      redrawArt();
+    }
+
+    function windowResized() {
+      const s = Math.min(window.innerWidth, window.innerHeight);
+      resizeCanvas(s, s);
+      redrawArt();
+    }
+
+    function setUIFromState() {
+      UI.a.value = state.a;
+      UI.b.value = state.b;
+      UI.c.value = state.c;
+      UI.d.value = state.d;
+      UI.n.value = state.n;
+    }
+
+    function randomizeParams() {
+      // ほどよく「出やすい」範囲に寄せる
+      state.a = random(-2.0, 2.0);
+      state.b = random(-2.0, 2.0);
+      state.c = random(-2.0, 2.0);
+      state.d = random(-2.0, 2.0);
+      state.n = int(random(80000, 260000));
+      setUIFromState();
+    }
+
+    function redrawArt() {
+      background(11, 12, 16);
+
+      // Clifford attractor
+      // x_{n+1} = sin(a*y_n) + c*cos(a*x_n)
+      // y_{n+1} = sin(b*x_n) + d*cos(b*y_n)
+      let x = 0.1, y = 0.1;
+
+      // 収束前の捨て反復
+      for (let i = 0; i < 200; i++) {
+        const nx = Math.sin(state.a * y) + state.c * Math.cos(state.a * x);
+        const ny = Math.sin(state.b * x) + state.d * Math.cos(state.b * y);
+        x = nx; y = ny;
+      }
+
+      // 画面への写像
+      // ざっくりスケール：綺麗に出ることが多い
+      const scale = width * 0.22;
+      const cx = width * 0.5;
+      const cy = height * 0.5;
+
+      // 軽めの点描
+      stroke(235, 238, 245, 18);
+      strokeWeight(1);
+
+      for (let i = 0; i < state.n; i++) {
+        const nx = Math.sin(state.a * y) + state.c * Math.cos(state.a * x);
+        const ny = Math.sin(state.b * x) + state.d * Math.cos(state.b * y);
+        x = nx; y = ny;
+
+        const px = cx + x * scale;
+        const py = cy + y * scale;
+
+        // たまに外れるのでガード
+        if (px >= 0 && px < width && py >= 0 && py < height) {
+          point(px, py);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
